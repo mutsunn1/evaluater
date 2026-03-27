@@ -28,7 +28,7 @@ async def start_assessment_api(payload: StartAssessmentRequest) -> StartAssessme
     )
 
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post("/chat", response_model=ChatResponse, response_model_exclude_none=True)
 async def assessment_chat_api(payload: ChatRequest) -> ChatResponse:
     if payload.session_id not in SESSIONS:
         raise HTTPException(status_code=404, detail="session_id not found")

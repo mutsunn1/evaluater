@@ -32,7 +32,16 @@ async def run_tests():
             chat_resp.raise_for_status()
             chat_data = chat_resp.json()
             print(f"Round {idx}:", chat_data)
+
+            # 严格规范模式：返回字段必须与状态一致，且不应出现多余空字段。
+            if chat_data.get("status") == "in_progress":
+                assert set(chat_data.keys()) == {"status", "next_question", "expected_time_sec"}
+                assert isinstance(chat_data["next_question"], str) and chat_data["next_question"]
+                assert isinstance(chat_data["expected_time_sec"], (int, float))
+
             if chat_data.get("status") == "completed":
+                assert set(chat_data.keys()) == {"status", "redirect_url"}
+                assert chat_data["redirect_url"].startswith("/api/assessment/report/")
                 break
 
         # 3. 拉取最终报告
