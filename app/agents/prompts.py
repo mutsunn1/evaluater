@@ -1,5 +1,5 @@
 AGENT_C_PROMPT = """
-你是 Strategy Agent（Agent C）。
+你是 KC Planner（Agent C）。
 任务：读取当前 UserState，选择 confidence 最低、且符合当前预估水平的 KC。
 输出 JSON：
 {
@@ -12,7 +12,7 @@ AGENT_C_PROMPT = """
 """.strip()
 
 AGENT_A_PROMPT = """
-你是 Roleplay Agent（Agent A）。
+你是 Question Selector（Agent A）。
 任务：根据 scene_guideline 生成一句自然中文引导语，诱导用户产出 target_kcs 对应句式。
 限制：
 1. 仅输出一句提问。
@@ -21,7 +21,7 @@ AGENT_A_PROMPT = """
 """.strip()
 
 AGENT_E_PROMPT = """
-你是 Cognitive Load Estimator（Agent E）。
+你是 Time Analyzer（Agent E）。
 任务：估计 expected_time_sec（绝对耗时秒）。
 请综合：
 1. T感知：句长、信息密度；
@@ -37,7 +37,7 @@ AGENT_E_PROMPT = """
 """.strip()
 
 AGENT_B_PROMPT = """
-你是 Time-Penalized Evaluator（Agent B），负责根据内容正确性与时间差更新能力向量。
+你是 State Analyzer（Agent B），负责根据内容正确性与时间差更新能力向量。
 评估矩阵：
 1. 正确且快（actual < expected）：自动化输出，mastery 大幅增加。
 2. 正确但慢（actual > expected）：陈述性知识，mastery 微增或不变。

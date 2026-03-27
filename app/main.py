@@ -13,20 +13,17 @@ if str(PROJECT_ROOT) not in sys.path:
 try:
     # 作为包运行（例如 uvicorn app.main:app）
     from app.api.assessment import router as assessment_router
-    from app.api.learning import router as learning_router
 except ModuleNotFoundError:
     # 作为脚本直跑（例如 python app/main.py）
     from api.assessment import router as assessment_router
-    from api.learning import router as learning_router
 
 app = FastAPI(
     title="Time-Penalized GENCAT SLA Assessment API",
-    version="0.1.0",
+    version="1.0.0",
     description="基于多轮开放式对话与时间惩罚的中文水平自适应评测后端",
 )
 
 app.include_router(assessment_router)
-app.include_router(learning_router)
 
 
 @app.get("/healthz")

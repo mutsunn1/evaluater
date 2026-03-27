@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import math
-from typing import Dict, List, Tuple
+from random import choice
+from typing import Dict, List, Set
 
-from app.models.domain import AssessmentReport, CognitiveFluency, DetailedUserProfile, UserState
-from app.services.kc_catalog import KC_BY_ID, LEVEL_TO_TIER
+from app.models.domain import AssessmentReport, CognitiveFluency, DetailedUserProfile, TurnTrace, UserState
+from app.services.kc_catalog import KC_BY_ID, KC_KEYWORD_RULES, build_question_bank
 
 
 def _clamp01(value: float) -> float:
@@ -17,8 +17,9 @@ def _avg_confidence(user_state: UserState) -> float:
     return sum(kc.confidence for kc in user_state.kcs.values()) / len(user_state.kcs)
 
 
-async def agent_c_strategy(user_state: UserState) -> Dict[str, object]:
-    target_tier = LEVEL_TO_TIER.get(user_state.global_level, 2)
+async def kc_planner_agent(user_state: UserState) -> Dict[str, object]:
+    """KC 规划者：基于当前状态选择下一轮目标 KC。"""
+    target_tier = user_state.dag_state.get("target_tier", 2)
     candidate_ids = [
         kc_id
         for kc_id in user_state.kcs
@@ -27,14 +28,16 @@ async def agent_c_strategy(user_state: UserState) -> Dict[str, object]:
     if not candidate_ids:
         candidate_ids = list(user_state.kcs.keys())
 
-    ranked = sorted(candidate_ids, key=lambda x: user_state.kcs[x].confidence)
-    target_kcs = ranked[:2]
+    # 先找置信度最低的点，再按掌握度排序，优先追踪“低置信+低掌握”的薄弱点。
+    ranked = sorted(candidate_ids, key=lambda x: (user_state.kcs[x].confidence, user_state.kcs[x].mastery))
+    target_kcs = ranked[:2] if len(ranked) >= 2 else ranked[:1]
 
     scene_bits = [KC_BY_ID[kc].description for kc in target_kcs if kc in KC_BY_ID]
     scene_guideline = "请在生活化场景中引导用户自然使用：" + "、".join(scene_bits or ["目标语法点"])
 
     global_conf = _avg_confidence(user_state)
-    should_stop = global_conf > 0.85 or user_state.rounds > 5
+    mastery_avg = sum(k.mastery for k in user_state.kcs.values()) / max(1, len(user_state.kcs))
+    should_stop = global_conf > 0.86 or user_state.rounds >= user_state.max_rounds or mastery_avg > 0.82
     reason = f"global_confidence={global_conf:.3f}, rounds={user_state.rounds}"
 
     return {
@@ -45,19 +48,18 @@ async def agent_c_strategy(user_state: UserState) -> Dict[str, object]:
     }
 
 
-async def agent_a_roleplay(scene_guideline: str, target_kcs: List[str]) -> str:
+async def question_selector_agent(scene_guideline: str, target_kcs: List[str]) -> str:
+    """题目挑选者：按目标 KC 生成或挑选开放式题目。"""
+    bank = build_question_bank()
     lead_kc = target_kcs[0] if target_kcs else "G_Adjective_Predicate"
+    if lead_kc in bank:
+        return choice(bank[lead_kc])
 
-    templates = {
-        "G_Structure_Ba": "你的桌子很乱，你会怎么整理这些书和笔？",
-        "G_Structure_Bei": "你最近有没有遇到什么倒霉事？可以具体说说吗？",
-        "G_Particle_Le_Action": "你昨天晚上做了什么？请用完整句子回答。",
-        "G_Comparison_Bi": "你觉得线上学习和线下学习，哪一个更适合你？为什么？",
-    }
-    return templates.get(lead_kc, f"{scene_guideline}。请你用一句自然的中文完整回答。")
+    return f"{scene_guideline}。请用2到3句自然中文回答。"
 
 
-async def agent_e_time_estimator(question: str, user_state: UserState, target_kcs: List[str]) -> Dict[str, float]:
+async def time_analyzer_agent(question: str, user_state: UserState, target_kcs: List[str]) -> Dict[str, float]:
+    """耗时分析器：估计当前题目的预期答题时间。"""
     t_perception = max(4.0, len(question) * 0.18)
 
     if target_kcs:
@@ -66,7 +68,8 @@ async def agent_e_time_estimator(question: str, user_state: UserState, target_kc
         mastery_values = [kc.mastery for kc in user_state.kcs.values()]
     mastery_avg = sum(mastery_values) / max(1, len(mastery_values))
 
-    t_retrieval = 8.0 * (1.05 - mastery_avg)
+    # mastery 越低，检索越慢；给一个下限避免极端值导致估计异常。
+    t_retrieval = max(1.8, 8.0 * (1.05 - mastery_avg))
     punctuation_penalty = question.count("，") * 0.3 + question.count("？") * 0.4
     structure_bonus = 1.2 if any(kc.startswith("G_Complement") for kc in target_kcs) else 0.6
     complexity_bonus = max(0.4, punctuation_penalty + structure_bonus)
@@ -80,52 +83,58 @@ async def agent_e_time_estimator(question: str, user_state: UserState, target_kc
     }
 
 
-def _content_correctness(user_text: str, target_kcs: List[str]) -> float:
+def _keyword_hit_count(text: str, keywords: List[str]) -> int:
+    """统计关键词命中次数。
+
+    这里使用简单字串匹配，不做分词，以满足提示词中“词汇与前后缀可直接字串识别”的要求。
+    """
+    return sum(1 for kw in keywords if kw and kw in text)
+
+
+def _content_correctness(user_text: str, target_kcs: List[str], vocab_bucket: Set[str]) -> float:
     text = user_text.strip()
     if not text:
         return 0.0
 
     pattern_score = 0.0
     for kc in target_kcs:
-        if kc == "G_Structure_Ba" and "把" in text:
-            pattern_score += 1.0
-        elif kc == "G_Structure_Bei" and "被" in text:
-            pattern_score += 1.0
-        elif kc == "G_Particle_Le_Action" and "了" in text:
-            pattern_score += 1.0
-        elif kc == "G_Particle_Guo" and "过" in text:
-            pattern_score += 1.0
-        elif kc == "G_Comparison_Bi" and "比" in text:
-            pattern_score += 1.0
-        elif kc == "G_Question_VnotV" and "不" in text:
-            pattern_score += 0.8
-        elif kc == "G_Modal_Can" and any(x in text for x in ["会", "能", "可以"]):
-            pattern_score += 0.8
-        elif kc.startswith("PR_") and any(x in text for x in ["有点", "其实", "就是", "怎么说呢"]):
-            pattern_score += 0.8
+        keys = KC_KEYWORD_RULES.get(kc, [])
+        hit = _keyword_hit_count(text, keys)
+        if hit > 0:
+            pattern_score += min(1.0, 0.5 + 0.25 * hit)
 
-    length_bonus = 0.2 if len(text) >= 8 else 0.0
-    raw = pattern_score / max(1, len(target_kcs)) + length_bonus
+    # 与词汇桶重合越高，说明输出词汇与当前可用词汇系统越一致。
+    bucket_hits = sum(1 for token in vocab_bucket if token in text)
+    bucket_bonus = min(0.25, 0.03 * bucket_hits)
+    length_bonus = 0.15 if len(text) >= 8 else 0.0
+    raw = pattern_score / max(1, len(target_kcs)) + length_bonus + bucket_bonus
     return max(0.0, min(1.0, raw))
 
 
-async def agent_b_time_penalized_evaluator(
+async def state_analyzer_agent(
     user_state: UserState,
     user_response_text: str,
     actual_time_sec: float,
     expected_time_sec: float,
     target_kcs: List[str],
 ) -> Dict[str, object]:
+    """状态分析者：执行时间惩罚与状态迁移。
+
+    包含三部分核心动作：
+    1) 计算内容正确性与时间比。
+    2) 应用时间惩罚矩阵更新 mastery/confidence。
+    3) 按回答中的字串命中更新词汇桶与 DAG 节点状态。
+    """
     if not target_kcs:
         target_kcs = sorted(user_state.kcs.keys(), key=lambda k: user_state.kcs[k].confidence)[:1]
 
-    correctness = _content_correctness(user_response_text, target_kcs)
+    correctness = _content_correctness(user_response_text, target_kcs, user_state.vocab_bucket)
     time_ratio = actual_time_sec / max(0.1, expected_time_sec)
 
-    # 下面是时间惩罚核心逻辑：
-    # 1) 先判断回答是否“足够正确”，用 correctness >= 0.6 作为阈值。
-    # 2) 若正确，再根据 actual/expected 的比值判断是“自动化流畅输出”还是“慢速检索输出”。
-    # 3) 若错误，不管快慢，均执行较大幅度扣分，避免“快但错”被误判为高能力。
+    # 时间惩罚核心矩阵（与提示词保持一致）：
+    # - 正确且快：mastery 大幅增加
+    # - 正确但慢：mastery 小幅增加或不变
+    # - 错误：mastery 大幅下降
     if correctness >= 0.6 and actual_time_sec < expected_time_sec:
         mastery_delta = 0.12
         confidence_delta = 0.10
@@ -161,16 +170,33 @@ async def agent_b_time_penalized_evaluator(
             "confidence_after": round(kc.confidence, 4),
         }
 
+        # DAG 节点状态同步更新，便于后续图谱可视化或调度策略解释。
+        node_meta = user_state.dag_state.get("nodes", {}).get(kc_id, {})
+        node_meta["mastery"] = kc.mastery
+        node_meta["confidence"] = kc.confidence
+        user_state.dag_state["nodes"][kc_id] = node_meta
+
+    # 词汇桶增量更新：把用户回答中命中的高频词加入桶，形成动态词汇画像。
+    adaptive_tokens = [
+        token
+        for token in ["把", "被", "了", "过", "虽然", "但是", "其实", "有点", "可以", "应该"]
+        if token in user_response_text
+    ]
+    user_state.vocab_bucket.update(adaptive_tokens)
+
     user_state.rounds += 1
     user_state.total_actual_time_sec += actual_time_sec
     user_state.total_expected_time_sec += expected_time_sec
-    user_state.conversation_history.append(
-        {
-            "question": user_state.last_question,
-            "answer": user_response_text,
-            "result_bucket": bucket,
-            "time_ratio": f"{time_ratio:.3f}",
-        }
+    user_state.turn_history.append(
+        TurnTrace(
+            question=user_state.last_question,
+            answer=user_response_text,
+            expected_time_sec=expected_time_sec,
+            actual_time_sec=actual_time_sec,
+            time_ratio=round(time_ratio, 4),
+            result_bucket=bucket,
+            target_kcs=list(target_kcs),
+        )
     )
 
     return {

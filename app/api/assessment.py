@@ -17,7 +17,10 @@ router = APIRouter(prefix="/api/assessment", tags=["assessment"])
 
 @router.post("/start", response_model=StartAssessmentResponse)
 async def start_assessment_api(payload: StartAssessmentRequest) -> StartAssessmentResponse:
-    user_state, first_question, expected_time = await start_assessment(payload.self_assessed_level)
+    user_state, first_question, expected_time = await start_assessment(
+        user_id=payload.user_id,
+        self_assessed_level=payload.self_assessed_level,
+    )
     return StartAssessmentResponse(
         session_id=user_state.session_id,
         first_question=first_question,

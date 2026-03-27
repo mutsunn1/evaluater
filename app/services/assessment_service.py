@@ -6,21 +6,14 @@ from typing import Tuple
 from app.agents.simulated_agents import report_agent
 from app.models.domain import AssessmentReport, KCState, UserState
 from app.models.schemas import SelfAssessedLevel
-from app.services.kc_catalog import KC_DEFS
-from app.services.pipeline import chat_pipeline_b_c_a_e, start_pipeline_c_a_e
+from app.services.kc_catalog import KC_DEFS, build_initial_dag_state, build_level_seed
+from app.services.pipeline import main_agent_chat_pipeline, main_agent_start_pipeline
 from app.store.memory_db import SESSIONS
 
-INIT_MASTERY = {
-    SelfAssessedLevel.BEGINNER: 0.2,
-    SelfAssessedLevel.INTERMEDIATE: 0.5,
-    SelfAssessedLevel.ADVANCED: 0.8,
-}
 
-
-def _build_initial_user_state(self_assessed_level: SelfAssessedLevel) -> UserState:
+def _build_initial_user_state(user_id: str, self_assessed_level: SelfAssessedLevel) -> UserState:
     session_id = str(uuid.uuid4())
-    init_mastery = INIT_MASTERY[self_assessed_level]
-    init_confidence = 0.4
+    init_mastery, init_confidence, vocab_bucket, target_tier = build_level_seed(self_assessed_level.value)
 
     kcs = {
         item.kc_id: KCState(
@@ -30,17 +23,24 @@ def _build_initial_user_state(self_assessed_level: SelfAssessedLevel) -> UserSta
         )
         for item in KC_DEFS
     }
+
+    dag_state = build_initial_dag_state()
+    dag_state["target_tier"] = target_tier
+
     return UserState(
         session_id=session_id,
+        user_id=user_id,
         kcs=kcs,
+        vocab_bucket=vocab_bucket,
+        dag_state=dag_state,
         global_level=self_assessed_level.value,
     )
 
 
-async def start_assessment(self_assessed_level: SelfAssessedLevel) -> Tuple[UserState, str, float]:
-    user_state = _build_initial_user_state(self_assessed_level)
+async def start_assessment(user_id: str, self_assessed_level: SelfAssessedLevel) -> Tuple[UserState, str, float]:
+    user_state = _build_initial_user_state(user_id=user_id, self_assessed_level=self_assessed_level)
 
-    pipeline_result = await start_pipeline_c_a_e(user_state)
+    pipeline_result = await main_agent_start_pipeline(user_state)
     strategy = pipeline_result["strategy"]
     question = pipeline_result["question"]
     timing = pipeline_result["timing"]
@@ -56,11 +56,12 @@ async def start_assessment(self_assessed_level: SelfAssessedLevel) -> Tuple[User
 async def process_chat(session_id: str, user_response_text: str, actual_time_sec: float) -> dict:
     user_state = SESSIONS[session_id]
 
-    pipeline_result = await chat_pipeline_b_c_a_e(user_state, user_response_text, actual_time_sec)
+    pipeline_result = await main_agent_chat_pipeline(user_state, user_response_text, actual_time_sec)
     strategy = pipeline_result["strategy"]
     if pipeline_result["completed"]:
         return {
             "status": "completed",
+            "session_id": session_id,
             "redirect_url": f"/api/assessment/report/{session_id}",
         }
 
@@ -73,6 +74,7 @@ async def process_chat(session_id: str, user_response_text: str, actual_time_sec
 
     return {
         "status": "in_progress",
+        "session_id": session_id,
         "next_question": question,
         "expected_time_sec": timing["expected_time_sec"],
     }
