@@ -61,7 +61,6 @@ async def process_chat(session_id: str, user_response_text: str, actual_time_sec
     if pipeline_result["completed"]:
         return {
             "status": "completed",
-            "session_id": session_id,
             "redirect_url": f"/api/assessment/report/{session_id}",
         }
 
@@ -74,7 +73,6 @@ async def process_chat(session_id: str, user_response_text: str, actual_time_sec
 
     return {
         "status": "in_progress",
-        "session_id": session_id,
         "next_question": question,
         "expected_time_sec": timing["expected_time_sec"],
     }

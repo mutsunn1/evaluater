@@ -31,7 +31,6 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     status: Literal["in_progress", "completed"]
-    session_id: Optional[str] = None
     next_question: Optional[str] = None
     expected_time_sec: Optional[float] = None
     redirect_url: Optional[str] = None

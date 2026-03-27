@@ -83,7 +83,6 @@ uvicorn app.main:app --host 127.0.0.1 --port 18000 --reload
 ```json
 {
   "status": "completed",
-  "session_id": "...",
   "redirect_url": "/api/assessment/report/{session_id}"
 }
 ```
@@ -93,7 +92,6 @@ uvicorn app.main:app --host 127.0.0.1 --port 18000 --reload
 ```json
 {
   "status": "in_progress",
-  "session_id": "...",
   "next_question": "...",
   "expected_time_sec": 11.2
 }
@@ -113,3 +111,4 @@ uvicorn app.main:app --host 127.0.0.1 --port 18000 --reload
 
 - 业务运行默认采用本地 async 模拟 Agent（便于离线快速验证）。
 - 同时提供 OxyGent 标准组装代码，见 app/agents/oxygent_workflows.py。
+- 默认开启 STRICT_SPEC_MODE=1，会对主流程输出进行规范序列校验。
