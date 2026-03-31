@@ -1,0 +1,23 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: evaluater-api
+    ports:
+      - "18000:18000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DEFAULT_LLM_API_KEY: ${DEFAULT_LLM_API_KEY:-}
+      DEFAULT_LLM_BASE_URL: ${DEFAULT_LLM_BASE_URL:-https://api.openai.com/v1}
+      DEFAULT_LLM_MODEL_NAME: ${DEFAULT_LLM_MODEL_NAME:-}
+      STRICT_SPEC_MODE: "1"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

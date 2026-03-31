@@ -46,6 +46,44 @@ set DEFAULT_LLM_MODEL_NAME=你的模型名
 uvicorn app.main:app --host 127.0.0.1 --port 18000 --reload
 ```
 
+## Docker 一键部署
+
+- 准备环境变量（首次执行）：
+
+```bash
+copy .env.example .env
+```
+
+- 编辑 `.env`，至少填写以下必需项：
+
+- `DEFAULT_LLM_API_KEY`
+- `DEFAULT_LLM_MODEL_NAME`
+
+- 一键构建并启动：
+
+```bash
+docker compose up -d --build
+```
+
+- 验证服务状态：
+
+```bash
+docker compose ps
+curl http://127.0.0.1:18000/healthz
+```
+
+- 查看日志：
+
+```bash
+docker compose logs -f api
+```
+
+- 停止并清理容器：
+
+```bash
+docker compose down
+```
+
 ## REST API
 
 ### 1) POST /api/assessment/start
