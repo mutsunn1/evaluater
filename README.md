@@ -17,7 +17,6 @@
 ├── app
 │   ├── agents
 │   │   ├── prompts.py
-│   │   ├── simulated_agents.py
 │   │   └── oxygent_workflows.py
 │   ├── api
 │   │   └── assessment.py
@@ -40,6 +39,10 @@
 
 ```bash
 pip install -r requirements.txt
+set DEFAULT_LLM_API_KEY=你的真实Key
+set DEFAULT_LLM_MODEL_NAME=你的模型名
+# 可选：如使用 OpenAI 兼容网关，可配置 BASE_URL
+# set DEFAULT_LLM_BASE_URL=https://api.openai.com/v1
 uvicorn app.main:app --host 127.0.0.1 --port 18000 --reload
 ```
 
@@ -109,8 +112,8 @@ uvicorn app.main:app --host 127.0.0.1 --port 18000 --reload
 
 ## OxyGent 编排说明
 
-- 业务运行默认采用本地 async 模拟 Agent（便于离线快速验证）。
-- 同时提供 OxyGent 标准组装代码，见 app/agents/oxygent_workflows.py。
+- 业务运行仅采用 OxyGent 工作流（必须提供可用 API Key）。
+- 主流程与 Agent F 均通过 app/agents/oxygent_workflows.py 调用。
 - 默认开启 STRICT_SPEC_MODE=1，会对主流程输出进行规范序列校验。
 - 严格模式下 chat 接口会剔除 None 字段：
   - in_progress 仅返回 status、next_question、expected_time_sec

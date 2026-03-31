@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Tuple
 
-from app.agents.simulated_agents import report_agent
+from app.agents.oxygent_workflows import report_agent
 from app.models.domain import AssessmentReport, KCState, UserState
 from app.models.schemas import SelfAssessedLevel
 from app.services.kc_catalog import KC_DEFS, build_initial_dag_state, build_level_seed
