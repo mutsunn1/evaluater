@@ -15,6 +15,11 @@ from app.agents.prompts import (
 )
 from app.models.domain import AssessmentReport, TurnTrace, UserState
 from app.services.kc_catalog import KC_BY_ID
+from app.services.knowledge_state import (
+    dag_reverse_propagate,
+    time_decay_gamma,
+    update_kc_with_bkt,
+)
 
 try:
     from oxygent import MAS, OxyRequest, oxy
@@ -105,6 +110,8 @@ def _state_compact(user_state: UserState, top_n: int = 10) -> Dict[str, object]:
         "kcs_low_conf": [
             {
                 "kc_id": item.kc_id,
+                "alpha": round(item.alpha, 4),
+                "beta": round(item.beta, 4),
                 "mastery": round(item.mastery, 4),
                 "confidence": round(item.confidence, 4),
                 "tier": KC_BY_ID[item.kc_id].tier if item.kc_id in KC_BY_ID else None,
@@ -299,6 +306,7 @@ async def state_analyzer_agent(
     correctness_raw = payload.get("correctness")
     correctness = _clamp01(float(correctness_raw)) if isinstance(correctness_raw, (int, float)) else 0.0
     time_ratio = actual_time_sec / max(0.1, expected_time_sec)
+    gamma = time_decay_gamma(actual_time_sec=actual_time_sec, expected_time_sec=expected_time_sec)
 
     bucket = payload.get("bucket")
     if not isinstance(bucket, str):
@@ -326,21 +334,27 @@ async def state_analyzer_agent(
     updates: Dict[str, Dict[str, float]] = {}
     for kc_id in target_kcs:
         kc = user_state.kcs[kc_id]
-        before_mastery = kc.mastery
-        before_conf = kc.confidence
-        kc.mastery = _clamp01(kc.mastery + mastery_delta)
-        kc.confidence = _clamp01(kc.confidence + confidence_delta)
-        updates[kc_id] = {
-            "mastery_before": round(before_mastery, 4),
-            "mastery_after": round(kc.mastery, 4),
-            "confidence_before": round(before_conf, 4),
-            "confidence_after": round(kc.confidence, 4),
-        }
+        updates[kc_id] = update_kc_with_bkt(kc=kc, correctness=correctness, gamma=gamma)
+        updates[kc_id]["heuristic_mastery_delta"] = round(mastery_delta, 4)
+        updates[kc_id]["heuristic_confidence_delta"] = round(confidence_delta, 4)
 
         node_meta = user_state.dag_state.get("nodes", {}).get(kc_id, {})
+        node_meta["alpha"] = kc.alpha
+        node_meta["beta"] = kc.beta
         node_meta["mastery"] = kc.mastery
         node_meta["confidence"] = kc.confidence
         user_state.dag_state["nodes"][kc_id] = node_meta
+
+    dag_backprop = dag_reverse_propagate(user_state=user_state, source_kc_ids=target_kcs)
+    for record in dag_backprop:
+        prereq_kc_id = record["to_prereq_kc"]
+        prereq = user_state.kcs[prereq_kc_id]
+        node_meta = user_state.dag_state.get("nodes", {}).get(prereq_kc_id, {})
+        node_meta["alpha"] = prereq.alpha
+        node_meta["beta"] = prereq.beta
+        node_meta["mastery"] = prereq.mastery
+        node_meta["confidence"] = prereq.confidence
+        user_state.dag_state["nodes"][prereq_kc_id] = node_meta
 
     adaptive_tokens = [
         token
@@ -368,7 +382,9 @@ async def state_analyzer_agent(
         "bucket": bucket,
         "correctness": round(correctness, 4),
         "time_ratio": round(time_ratio, 4),
+        "gamma": round(gamma, 4),
         "updates": updates,
+        "dag_backprop": dag_backprop,
     }
 
 
@@ -378,6 +394,8 @@ async def report_agent(user_state: UserState) -> AssessmentReport:
         "rounds": user_state.rounds,
         "kcs": {
             kc_id: {
+                "alpha": round(kc.alpha, 4),
+                "beta": round(kc.beta, 4),
                 "mastery": round(kc.mastery, 4),
                 "confidence": round(kc.confidence, 4),
             }

@@ -104,9 +104,10 @@ def build_initial_dag_state() -> Dict[str, object]:
         ("G_Conjunction_Paired", "G_Rhetorical_Question"),
     ]
 
+    default_weight = 0.35
     return {
         "nodes": {kc.kc_id: {"tier": kc.tier, "description": kc.description} for kc in KC_DEFS},
-        "edges": [{"from": src, "to": dst} for src, dst in edges],
+        "edges": [{"from": src, "to": dst, "weight": default_weight} for src, dst in edges],
     }
 
 

@@ -9,6 +9,8 @@ class KCState(BaseModel):
     """单个知识组件状态。"""
 
     kc_id: str
+    alpha: float = Field(gt=0.0)
+    beta: float = Field(gt=0.0)
     mastery: float = Field(ge=0.0, le=1.0)
     confidence: float = Field(ge=0.0, le=1.0)
 

@@ -7,6 +7,7 @@ from app.agents.oxygent_workflows import report_agent
 from app.models.domain import AssessmentReport, KCState, UserState
 from app.models.schemas import SelfAssessedLevel
 from app.services.kc_catalog import KC_DEFS, build_initial_dag_state, build_level_seed
+from app.services.knowledge_state import seed_alpha_beta
 from app.services.pipeline import main_agent_chat_pipeline, main_agent_start_pipeline
 from app.store.memory_db import SESSIONS
 
@@ -15,9 +16,12 @@ def _build_initial_user_state(user_id: str, self_assessed_level: SelfAssessedLev
     session_id = str(uuid.uuid4())
     init_mastery, init_confidence, vocab_bucket, target_tier = build_level_seed(self_assessed_level.value)
 
+    alpha_seed, beta_seed = seed_alpha_beta(init_mastery, init_confidence)
     kcs = {
         item.kc_id: KCState(
             kc_id=item.kc_id,
+            alpha=alpha_seed,
+            beta=beta_seed,
             mastery=init_mastery,
             confidence=init_confidence,
         )
